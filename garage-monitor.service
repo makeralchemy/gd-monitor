@@ -1,0 +1,11 @@
+[Unit]
+Description=Raspberry Pi System Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash garage-monitor.sh
+WorkingDirectory=/home/pi/Code/garage
+
+[Install]
+WantedBy=multi-user.target
