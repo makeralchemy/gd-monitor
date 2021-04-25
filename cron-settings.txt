@@ -1,0 +1,11 @@
+# Settings that need to be added to cron to:
+#    Shutdown if the cpu or gpu get too hot
+#    Periodically check if the python process is running and reboot if not
+#    Reboot every night; this avoids problems with the ultrasonic sensors
+# 
+# m h  dom mon dow   command
+*/5 * * * * /home/pi/Code/garage/pi-temp-monitor.sh > /dev/null 2>&1
+*/5 * * * * /home/pi/Code/garage/gdoor-up-check.sh > /dev/null 2>&1
+00 2 * * * sudo /sbin/reboot
+
+
