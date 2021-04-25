@@ -47,6 +47,8 @@ DOOR_OPEN_WARNING_MESSAGE = "Garage door has been open more than {} minutes"
 # If SLACK_DEBUG is set to True messages will not be sent to slack.
 SLACK_DEBUG = False
 
+# Slack message successfully sent
+SLACK_SUCCESS = 200
 
 def get_average_measurement(distance_sensor,
                             num_measurements,
@@ -165,6 +167,8 @@ def monitor_door(trigger_pin,
                 # Don't send a slack message the first time through
                 if iteration > 0:
                     slack_iot.post_message(DOOR_OPENED_MESSAGE)
+                    if slack_iot.status_code != SLACK_SUCCESS:
+                        door_log.information("Unable to send slack garage door Opened notification")
 
                 # Record the time that door was opened.
                 opened_time = time.time()
@@ -180,6 +184,8 @@ def monitor_door(trigger_pin,
                 # Don't send a slack message the first time through
                 if iteration > 0:
                     slack_iot.post_message(DOOR_CLOSED_MESSAGE)
+                    if slack_iot.status_code != SLACK_SUCCESS:
+                        door_log.information("Unable to send slack garage door Closed notification")
 
         # If the door is closed, blink the LED briefly.  This blinking
         # is like what happens on smoke detectors and is done to indicate
