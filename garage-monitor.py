@@ -13,10 +13,12 @@ from __future__ import print_function
 import argparse
 import math
 import os
+import requests
 import RPi.GPIO as GPIO
 import time
 
 # Import required libraries.
+import gd_closer_credentials
 import journal
 import sensor
 import slack
@@ -49,6 +51,37 @@ SLACK_DEBUG = False
 
 # Slack message successfully sent
 SLACK_SUCCESS = 200
+
+# Garage door closing device status update commands
+GD_CLOSER_CLOSED = "setgdclosed"
+GD_CLOSER_OPEN   = "setgdopen"
+
+
+def post_gdoor_status(status):
+    """
+    Send a HTTPS POST to a Particle Photon microcontroller attached to the Particle Cloud.
+    The Photon keeps track of the garage door status and via an app will allow a person to
+    close the garage door. The Photon will only allow the garage door to be closed (not opened)
+    and to enforce that requires up-to-date status of whether the garage door is currently open
+    or closed. A string with the status of the POST request is returned from this function.
+    """
+
+    GD_CLOSER_SOURCE = "gdmonitor"  # used to indicate where the POST command came from
+
+    # Define the parameters that will be sent in the POST request
+    headers = { 'Authorization' : 'Bearer ' + gd_closer_credentials.GD_CLOSER_BEARER }
+    data = { 'arg' : GD_CLOSER_SOURCE }
+    url = 'https://api.particle.io/v1/devices/' + gd_closer_credentials.GD_CLOSER_DEVICE + '/' + status
+
+    # Attempt to send the POST request. Failure will not stop the monitor program.
+    try:
+        response = requests.post(url, headers=headers, data=data)
+        return "POST to gdcloser with status={} was successful".format(status)
+    except requests.exceptions.RequestException as err:
+        return "POST to gdcloser Request failed with error: {}".format(err)
+    except Exception as err:
+        return "POST to gdcloser failed with an unexpected error: {}".format(err)
+    
 
 def get_average_measurement(distance_sensor,
                             num_measurements,
@@ -173,6 +206,9 @@ def monitor_door(trigger_pin,
                 # Record the time that door was opened.
                 opened_time = time.time()
 
+                # Send HTTPS POST with current status to the garage door closer device.
+                door_log.information(post_door_status(GD_CLOSER_OPEN))
+
             else:
                 # Log that the door has closed; set the LED to
                 # indicate that the door is closed; send a message
@@ -181,11 +217,15 @@ def monitor_door(trigger_pin,
                 door_previous_status = DOOR_CLOSED
                 door_log.information(DOOR_CLOSED_MESSAGE)
                 distance_sensor.set_door_status_led(DOOR_CLOSED)
+                
                 # Don't send a slack message the first time through
                 if iteration > 0:
                     slack_iot.post_message(DOOR_CLOSED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Closed notification")
+           
+                # Send HTTPS POST with current status to the garage door closer device.
+                door_log.information(post_gdoor_status(GD_CLOSER_CLOSED))
 
         # If the door is closed, blink the LED briefly.  This blinking
         # is like what happens on smoke detectors and is done to indicate
