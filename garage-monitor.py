@@ -211,7 +211,7 @@ def monitor_door(trigger_pin,
                 opened_time = time.time()
 
                 # Send HTTPS POST with current status to the garage door closer device.
-                door_log.information(post_door_status(GD_CLOSER_OPEN))
+                door_log.information(post_gdoor_status(GD_CLOSER_OPEN))
 
             else:
                 # Log that the door has closed; set the LED to
