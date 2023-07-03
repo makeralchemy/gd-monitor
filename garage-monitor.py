@@ -7,6 +7,10 @@
 # A Raspberry Pi model 3 or 3+ and a HC-SR05 ultrasonic distance sensor and a
 # handful of parts are required.
 #
+# Enhanced to send HTTP POST requests with the current garage door status to a
+# Particle Photon. The Photon will allow a person (via an app) to close the
+# garage door remotely. The Photon requires the current status of the garage
+# door so it can prevent a person from opening the door.
 
 # Import required standard libraries.
 from __future__ import print_function
