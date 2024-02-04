@@ -7,10 +7,6 @@
 # A Raspberry Pi model 3 or 3+ and a HC-SR05 ultrasonic distance sensor and a
 # handful of parts are required.
 #
-# Enhanced to send HTTP POST requests with the current garage door status to a
-# Particle Photon. The Photon will allow a person (via an app) to close the
-# garage door remotely. The Photon requires the current status of the garage
-# door so it can prevent a person from opening the door.
 
 # Import required standard libraries.
 from __future__ import print_function
@@ -38,8 +34,10 @@ GPIO_STATUS_LED = 21
 # restarteddue to fatal errors.
 GDOOR_ACTIVITY_LOGGER = "activity"
 GDOOR_STARTUP_LOGGER = "startup"
+GDOOR_ERROR_LOGGER = "errors"
 GDOOR_ACTIVITY_LOG_FILE = "gdoor-activity.log"
 GDOOR_STARTUP_LOG_FILE = "gdoor-startup.log"
+GDOOR_ERROR_LOG_FILE = "gdoor-errors.log"
 
 # Define the door states.
 DOOR_OPEN = "open"
@@ -59,6 +57,10 @@ SLACK_SUCCESS = 200
 # Garage door closing device status update commands
 GD_CLOSER_CLOSED = "setgdclosed"
 GD_CLOSER_OPEN   = "setgdopen"
+
+INTERNET_CHECK_URL = "http://www.google.com"
+INTERNET_CHECK_TIMEOUT = 5
+INTERNET_CHECK_INTERVAL = 600.0   # Check every 10 minutes
 
 
 def post_gdoor_status(status):
@@ -80,12 +82,23 @@ def post_gdoor_status(status):
     # Attempt to send the POST request. Failure will not stop the monitor program.
     try:
         response = requests.post(url, headers=headers, data=data)
-        return "POST to gdcloser with status={} was successful".format(status)
+        return True, "POST to gdcloser with status={} was successful".format(status)
     except requests.exceptions.RequestException as err:
-        return "POST to gdcloser Request failed with error: {}".format(err)
+        return False, "POST to gdcloser Request failed with error: {}".format(err)
     except Exception as err:
-        return "POST to gdcloser failed with an unexpected error: {}".format(err)
-    
+        return False, "POST to gdcloser failed with an unexpected error: {}".format(err)
+
+
+def check_internet():
+    """ Check to see if the internet is available """
+    try:
+        response = requests.get(INTERNET_CHECK_URL, timeout=INTERNET_CHECK_TIMEOUT)
+        return True
+    except (requests.ConnectionError, requests.Timeout) as err:
+        return False
+    except Exception as err:
+        return False
+
 
 def get_average_measurement(distance_sensor,
                             num_measurements,
@@ -120,6 +133,7 @@ def monitor_door(trigger_pin,
                  open_threshold,
                  warning_threshold,
                  door_log,
+                 error_log,
                  ):
 
     """
@@ -150,6 +164,9 @@ def monitor_door(trigger_pin,
     door_previous_status = DOOR_CLOSED
     door_status = DOOR_CLOSED
     last_warning = 0
+
+    # Reset seconds counter for internet check
+    internet_check_timer = 0
 
     while True:
 
@@ -206,12 +223,18 @@ def monitor_door(trigger_pin,
                     slack_iot.post_message(DOOR_OPENED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Opened notification")
+                        error_log.information("Unable to send slack garage door Opened notification")
 
                 # Record the time that door was opened.
                 opened_time = time.time()
 
                 # Send HTTPS POST with current status to the garage door closer device.
-                door_log.information(post_gdoor_status(GD_CLOSER_OPEN))
+                post_status_success, post_status_message = post_gdoor_status(GD_CLOSER_OPEN)
+                if post_status_success:
+                   door_log.information(post_status_message)
+                else:
+                   door_log.information(post_status_message)
+                   error_log.information(post_status_message)
 
             else:
                 # Log that the door has closed; set the LED to
@@ -227,9 +250,15 @@ def monitor_door(trigger_pin,
                     slack_iot.post_message(DOOR_CLOSED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Closed notification")
+                        error_log.information("Unable to send slack garage door Closed notification")
            
                 # Send HTTPS POST with current status to the garage door closer device.
-                door_log.information(post_gdoor_status(GD_CLOSER_CLOSED))
+                post_status_success, post_status_message = post_gdoor_status(GD_CLOSER_CLOSED)
+                if post_status_success:
+                    door_log.information(post_status_message)
+                else:
+                    door_log.information(post_status_message)
+                    error_log.information(post_status_message)
 
         # If the door is closed, blink the LED briefly.  This blinking
         # is like what happens on smoke detectors and is done to indicate
@@ -266,6 +295,17 @@ def monitor_door(trigger_pin,
         time.sleep(time_between_avg_measurements)
         door_log.debug("{:,} Awoken from sleep".format(iteration))
 
+        # every 10 minutes check to see if the internet is up
+        if internet_check_timer >= INTERNET_CHECK_INTERVAL:
+            if check_internet:
+                door_log.information("Internet check PASSED")
+                internet_check_timer = 0.0
+            else:
+                door_log.information("Internet check FAILED")
+                error_log.information("Internet check FAILED")
+                internet_check_timer = 0.0
+        else:
+            internet_check_timer += time_between_avg_measurements
 
 #
 # This is the main processing where the command line arguments are
@@ -284,6 +324,10 @@ def main():
                                   program_name)
 
     startup_log.information("Garage door monitor started.")
+
+    error_log = journal.Journal(GDOOR_ERROR_LOGGER,
+                                GDOOR_ERROR_LOG_FILE,
+                                program_name)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-c",
@@ -356,6 +400,7 @@ def main():
                  args.open,
                  args.warning,
                  door_log,
+                 error_log,
                  )
 
     door_log.debug("Exiting...")
