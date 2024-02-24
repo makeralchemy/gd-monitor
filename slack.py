@@ -39,6 +39,7 @@ class Iot(object):
         self.credentials_file = credentials_file
         self.debug = debug
         self.status_code = 0
+        self.error_message = ""
 
         if os.path.isfile(credentials_file):
 
@@ -93,6 +94,8 @@ class Iot(object):
             except requests.exceptions.RequestException as e:
                 print("Failed to send slack message:", e, file=sys.stderr)
                 self.status_code = 999
+                self.error_message = str(e)
+
 
 #
 # This main function is used for testing this library.
