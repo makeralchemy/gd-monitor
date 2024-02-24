@@ -29,15 +29,18 @@ GPIO_ECHO = 24
 GPIO_STATUS_LED = 21
 
 # Define the loggers and log files that will be used to
-# record activitiesand when the program has started. A separate
-# log is usedto make it easy to see how often the program is
-# restarteddue to fatal errors.
+# record activities and when the program has started. A separate
+# log is used to make it easy to see how often the program is
+# restart due to fatal errors.
 GDOOR_ACTIVITY_LOGGER = "activity"
 GDOOR_STARTUP_LOGGER = "startup"
 GDOOR_ERROR_LOGGER = "errors"
+GDOOR_INTERNET_LOGGER = "internet"
+
 GDOOR_ACTIVITY_LOG_FILE = "gdoor-activity.log"
 GDOOR_STARTUP_LOG_FILE = "gdoor-startup.log"
 GDOOR_ERROR_LOG_FILE = "gdoor-errors.log"
+GDOOR_INTERNET_LOG_FILE = "gdoor-internet.log"
 
 # Define the door states.
 DOOR_OPEN = "open"
@@ -134,6 +137,7 @@ def monitor_door(trigger_pin,
                  warning_threshold,
                  door_log,
                  error_log,
+                 internet_log,
                  ):
 
     """
@@ -143,10 +147,31 @@ def monitor_door(trigger_pin,
     """
 
     # Record the start of execution.
-    door_log.information("Door Monitoring Started")
+    door_log.information("Door Monitor Started")
+
+    internet_available = False
+    while not internet_available:
+        # Check for internet availability
+        if check_internet():
+            door_log.information("Internet is available")
+            internet_available = True
+        else:
+            door_log.information("Internet is not available, waiting 5 seconds for retry")
+            error_log.information("Internet is not available, waiting 5 seconds for retry")
+            time.sleep(5)
 
     # Setup for sending slack messages
     slack_iot = slack.Iot(debug=SLACK_DEBUG)
+    # DEBUG: see if there is a timing issue with doing a post too soon after setting slack up
+    time.sleep(5)
+
+    # Post a slack message indicating that the monitor has started
+    slack_iot.post_message("Garage door monitor started")
+    if slack_iot.status_code != SLACK_SUCCESS:
+        door_log.information("Unable to send initial slack message, see error log for details")
+        error_log.information("Unable to send initial slack message: " + slack_iot.error_message)
+    else:
+        door_log.information("Successfully sent initial slack message")
 
     # Initialize the utltrasonic distance sensor.
     distance_sensor = sensor.DistanceSensor(trigger_pin,
@@ -223,7 +248,7 @@ def monitor_door(trigger_pin,
                     slack_iot.post_message(DOOR_OPENED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Opened notification")
-                        error_log.information("Unable to send slack garage door Opened notification")
+                        error_log.information("Unable to send slack garage door Opened notification" + slack_iot.error_message)
 
                 # Record the time that door was opened.
                 opened_time = time.time()
@@ -244,14 +269,14 @@ def monitor_door(trigger_pin,
                 door_previous_status = DOOR_CLOSED
                 door_log.information(DOOR_CLOSED_MESSAGE)
                 distance_sensor.set_door_status_led(DOOR_CLOSED)
-                
+
                 # Don't send a slack message the first time through
                 if iteration > 0:
                     slack_iot.post_message(DOOR_CLOSED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Closed notification")
-                        error_log.information("Unable to send slack garage door Closed notification")
-           
+                        error_log.information("Unable to send slack garage door Closed notification" + slack_iot_error_message)
+
                 # Send HTTPS POST with current status to the garage door closer device.
                 post_status_success, post_status_message = post_gdoor_status(GD_CLOSER_CLOSED)
                 if post_status_success:
@@ -299,10 +324,12 @@ def monitor_door(trigger_pin,
         if internet_check_timer >= INTERNET_CHECK_INTERVAL:
             if check_internet:
                 door_log.information("Internet check PASSED")
+                internet_log.information("Internet check PASSED")
                 internet_check_timer = 0.0
             else:
                 door_log.information("Internet check FAILED")
                 error_log.information("Internet check FAILED")
+                internet_log.information("Internet check FAILED")
                 internet_check_timer = 0.0
         else:
             internet_check_timer += time_between_avg_measurements
@@ -328,6 +355,10 @@ def main():
     error_log = journal.Journal(GDOOR_ERROR_LOGGER,
                                 GDOOR_ERROR_LOG_FILE,
                                 program_name)
+
+    internet_log = journal.Journal(GDOOR_INTERNET_LOGGER,
+                                   GDOOR_INTERNET_LOG_FILE,
+                                   program_name)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-c",
@@ -391,19 +422,24 @@ def main():
     # minutes to seconds.
     checkstatus = 60 * args.checkstatus
 
-    monitor_door(GPIO_TRIGGER,
-                 GPIO_ECHO,
-                 GPIO_STATUS_LED,
-                 args.measurements,
-                 args.individual,
-                 checkstatus,
-                 args.open,
-                 args.warning,
-                 door_log,
-                 error_log,
-                 )
-
-    door_log.debug("Exiting...")
+    try:
+        monitor_door(GPIO_TRIGGER,
+                     GPIO_ECHO,
+                     GPIO_STATUS_LED,
+                     args.measurements,
+                     args.individual,
+                     checkstatus,
+                     args.open,
+                     args.warning,
+                     door_log,
+                     error_log,
+                     internet_log,
+                    )
+    except Exception as e:
+        door_log.information("Exception raised: " + str(e))
+        error_log.information("Exception raised: " + str(e))
+    finally:
+        door_log.information("Exiting...")
 
 if __name__ == "__main__":
     main()
