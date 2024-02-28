@@ -275,7 +275,7 @@ def monitor_door(trigger_pin,
                     slack_iot.post_message(DOOR_CLOSED_MESSAGE)
                     if slack_iot.status_code != SLACK_SUCCESS:
                         door_log.information("Unable to send slack garage door Closed notification")
-                        error_log.information("Unable to send slack garage door Closed notification" + slack_iot_error_message)
+                        error_log.information("Unable to send slack garage door Closed notification" + slack_iot.error_message)
 
                 # Send HTTPS POST with current status to the garage door closer device.
                 post_status_success, post_status_message = post_gdoor_status(GD_CLOSER_CLOSED)
